@@ -2,89 +2,111 @@ import streamlit as st
 import requests
 import re
 import smtplib
-import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google import genai
 
-# ================= SEGURIDAD MÁXIMA =================
-# En la nube, estas variables se leerán de los "Secrets" encriptados.
-# Si estás probando en local, puedes escribirlas aquí temporalmente o usar la interfaz de la web.
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-EMAIL_SENDER = st.secrets.get("EMAIL_SENDER", "")
-EMAIL_PASSWORD = st.secrets.get("EMAIL_PASSWORD", "")
+# ================= CONFIGURACIÓN DE PÁGINA =================
+st.set_page_config(page_title="Bot de Prospección", page_icon="🤖", layout="wide")
+st.title("🚀 Mi Bot Prospector Automático")
 
-# Inicializar cliente de Gemini con la nueva librería
-if GEMINI_API_KEY:
-    client_ai = genai.Client(api_key=GEMINI_API_KEY)
+# Inicializar la memoria de Streamlit para no perder los datos al hacer clic en botones
+if "negocios" not in st.session_state:
+    st.session_state.negocios =[]
 
-# ================= FUNCIONES =================
+# ================= BARRA LATERAL (CREDENCIALES) =================
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    st.info("Rellena esto para que la IA y los correos funcionen.")
+    
+    # Intenta leer de secrets (nube), si no, usa los campos de texto
+    GEMINI_API_KEY = st.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
+    EMAIL_SENDER = st.text_input("Tu Correo (Gmail)", value=st.secrets.get("EMAIL_SENDER", ""))
+    EMAIL_PASSWORD = st.text_input("Contraseña de Aplicación", value=st.secrets.get("EMAIL_PASSWORD", ""), type="password")
+
+# ================= FUNCIONES PRINCIPALES =================
 
 def buscar_negocios(ciudad, tipo_negocio):
-    overpass_url = "http://overpass-api.de/api/interpreter"
+    url = "https://overpass-api.de/api/interpreter"
+    
+    # Consulta robusta buscando nodos, vías y relaciones (nwr)
     query = f"""
-    [out:json];
-    area[name="{ciudad}"]->.searchArea;
-    node["amenity"="{tipo_negocio}"](area.searchArea);
-    out tags limit 5;
+    [out:json][timeout:25];
+    area["name"="{ciudad}"]->.searchArea;
+    nwr["amenity"="{tipo_negocio}"](area.searchArea);
+    out center tags limit 10;
     """
-    # SOLUCIÓN AL ERROR JSON: Añadir User-Agent
-    headers = {'User-Agent': 'BotProspeccionSeguro/1.0 (contacto@midominio.com)'}
+    
+    # Simulamos ser un navegador real y pedimos explícitamente formato JSON
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0',
+        'Accept': 'application/json'
+    }
     
     try:
-        respuesta = requests.get(overpass_url, params={'data': query}, headers=headers, timeout=10)
-        datos = respuesta.json()
+        # Petición POST pura (es la que menos falla en Overpass)
+        respuesta = requests.post(url, data={'data': query}, headers=headers, timeout=25)
         
+        # Si la base de datos da un error interno, lo mostramos claro
+        if respuesta.status_code != 200:
+            st.error(f"Error del servidor Overpass (Código {respuesta.status_code}): {respuesta.text[:200]}")
+            return []
+            
+        datos = respuesta.json()
         leads =[]
+        
         for elemento in datos.get('elements',[]):
             tags = elemento.get('tags', {})
             if 'name' in tags:
+                # Filtrar y limpiar los datos
                 leads.append({
-                    'nombre': tags.get('name'),
-                    'web': tags.get('website', None),
-                    'telefono': tags.get('phone', 'No disponible')
+                    'nombre': tags.get('name', 'Sin nombre'),
+                    'web': tags.get('website', None) or tags.get('contact:website', None),
+                    'telefono': tags.get('phone', None) or tags.get('contact:phone', 'No disponible')
                 })
-        return leads
+                
+        # Eliminar negocios duplicados por nombre
+        leads_unicos = {lead['nombre']: lead for lead in leads}.values()
+        return list(leads_unicos)[:5]  # Devolvemos máximo 5 para probar sin saturar
+        
+    except requests.exceptions.JSONDecodeError:
+        st.error("La base de datos bloqueó la petición (Devolvió HTML en lugar de datos). Intenta usar otra ciudad o espera unos minutos.")
+        return[]
     except Exception as e:
-        st.error(f"Error al buscar negocios: {e}")
+        st.error(f"Error técnico de conexión: {e}")
         return[]
 
 def extraer_email_de_web(url):
-    if not url.startswith("http"):
-        url = "http://" + url
+    if not url: return None
+    if not url.startswith("http"): url = "https://" + url
+    
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=headers, timeout=7)
         emails = set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}", response.text))
-        emails =[e for e in emails if not e.endswith(('sentry.io', 'wix.com', 'png', 'jpg'))]
+        emails =[e for e in emails if not e.lower().endswith(('sentry.io', 'wix.com', 'png', 'jpg', 'gif'))]
         return emails[0] if emails else None
     except:
         return None
 
-def analizar_velocidad(url):
-    if not url: return None
+def generar_email(nombre, tiene_web):
+    if not GEMINI_API_KEY:
+        return "⚠️ Necesitas poner tu API Key de Gemini en la barra lateral para generar el texto."
+        
     try:
-        api_url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={url}"
-        respuesta = requests.get(api_url).json()
-        score = respuesta['lighthouseResult']['categories']['performance']['score'] * 100
-        return int(score)
-    except:
-        return None
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        if tiene_web:
+            problema = "Tienen página web, pero diles que hoy en día la velocidad y el diseño móvil son clave para no perder clientes, y tú puedes auditarla/mejorarla."
+        else:
+            problema = "No tienen página web. Diles que están perdiendo visibilidad en Google frente a su competencia y tú puedes crearles una atractiva."
 
-def generar_email(nombre, tiene_web, score):
-    if tiene_web and score is not None:
-        problema = f"He analizado su web y carga con una nota de {score}/100 según Google. Están perdiendo visitas."
-    else:
-        problema = "He visto que no tienen página web y pierden visibilidad en Google frente a la competencia."
-
-    prompt = f"Eres experto en ventas B2B. Escribe un correo muy corto (3 líneas) para '{nombre}'. Contexto: {problema}. Propón una breve llamada de 5 minutos."
-    
-    # SOLUCIÓN AL ERROR DE GEMINI: Usar la nueva sintaxis
-    respuesta = client_ai.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt
-    )
-    return respuesta.text
+        prompt = f"Eres experto en ventas de desarrollo web. Escribe un email corto, directo y muy educado (máximo 4 líneas) para el negocio '{nombre}'. {problema} Propón una breve llamada de 5 minutos. No uses saludos corporativos aburridos."
+        
+        respuesta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        return respuesta.text
+    except Exception as e:
+        return f"Error al generar con IA: {e}"
 
 def enviar_correo(destinatario, asunto, cuerpo):
     msg = MIMEMultipart()
@@ -101,64 +123,64 @@ def enviar_correo(destinatario, asunto, cuerpo):
         server.quit()
         return True
     except Exception as e:
+        st.error(f"Error enviando correo: {e}")
         return False
 
-# ================= INTERFAZ WEB (STREAMLIT) =================
-
-st.set_page_config(page_title="Máquina de Prospección", page_icon="🤖")
-st.title("🚀 Mi Bot Prospector B2B")
-
-with st.sidebar:
-    st.header("⚙️ Configuración Segura")
-    st.info("Si configuras los 'Secrets' en la nube, no necesitas rellenar esto.")
-    if not GEMINI_API_KEY:
-        GEMINI_API_KEY = st.text_input("Gemini API Key", type="password")
-    if not EMAIL_SENDER:
-        EMAIL_SENDER = st.text_input("Tu Correo Gmail")
-    if not EMAIL_PASSWORD:
-        EMAIL_PASSWORD = st.text_input("Contraseña de Aplicación", type="password")
+# ================= INTERFAZ PRINCIPAL =================
 
 col1, col2 = st.columns(2)
 with col1:
-    ciudad = st.text_input("Ciudad", "Valencia")
+    ciudad_input = st.text_input("📍 Ciudad", "Valencia")
 with col2:
-    tipo = st.selectbox("Tipo de Negocio", ["dentist", "restaurant", "hospital", "cafe"])
+    tipo_input = st.selectbox("🏢 Tipo de Negocio", ["dentist", "restaurant", "hospital", "lawyer", "gym"])
 
-if st.button("🔍 Buscar y Generar Campaña", type="primary"):
-    if not GEMINI_API_KEY:
-        st.error("⚠️ Faltan las credenciales en la configuración.")
-    else:
-        with st.spinner('Buscando clientes en la base de datos...'):
-            negocios = buscar_negocios(ciudad, tipo)
+if st.button("🔍 Buscar Clientes Potenciales", type="primary", use_container_width=True):
+    with st.spinner('Buscando en la base de datos (esto puede tardar unos segundos)...'):
+        # Guardamos el resultado en la "memoria" (session_state)
+        st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
+        if not st.session_state.negocios:
+            st.warning("No se encontraron resultados o la base de datos tardó mucho en responder.")
+
+# Mostrar los negocios que están en memoria
+if st.session_state.negocios:
+    st.markdown("---")
+    st.subheader("📋 Resultados de la Búsqueda")
+    
+    for neg in st.session_state.negocios:
+        with st.expander(f"🏢 {neg['nombre']}", expanded=True):
+            st.write(f"**Web:** {neg['web'] or '❌ No tiene'}")
+            st.write(f"**Teléfono:** {neg['telefono']}")
             
-            if not negocios:
-                st.warning("No se encontraron negocios o la base de datos no respondió.")
+            tiene_web = bool(neg['web'])
+            email = None
             
-            for neg in negocios:
-                with st.expander(f"🏢 {neg['nombre']}", expanded=True):
-                    st.write(f"**Web:** {neg['web'] or 'No tiene'}")
-                    st.write(f"**Teléfono:** {neg['telefono']}")
-                    
-                    tiene_web = bool(neg['web'])
-                    email = None
-                    score = None
-                    
-                    if tiene_web:
-                        email = extraer_email_de_web(neg['web'])
-                        score = analizar_velocidad(neg['web'])
-                        st.write(f"**Velocidad Web:** {f'{score}/100' if score else 'Desconocida'}")
-                        
-                    if email:
-                        st.success(f"📧 Email encontrado: {email}")
-                        mensaje = generar_email(neg['nombre'], tiene_web, score)
-                        st.text_area("Borrador del correo:", mensaje, height=150)
-                        
-                        # Botón para enviar
-                        if EMAIL_SENDER and EMAIL_PASSWORD:
-                            if st.button(f"📨 Enviar Correo a {neg['nombre']}", key=email):
-                                if enviar_correo(email, f"Mejora digital para {neg['nombre']}", mensaje):
-                                    st.success("¡Enviado correctamente!")
-                                else:
-                                    st.error("Error al enviar. Revisa tus contraseñas.")
+            if tiene_web:
+                email = extraer_email_de_web(neg['web'])
+                
+            if email:
+                st.success(f"📧 Email de contacto encontrado: {email}")
+                
+                # Botón para generar mensaje con IA
+                if st.button(f"✨ Redactar Email con IA para {neg['nombre']}", key=f"gen_{neg['nombre']}"):
+                    if not GEMINI_API_KEY:
+                        st.error("Pon tu Gemini API Key a la izquierda primero.")
                     else:
-                        st.warning("No se encontró email público. ¡Toca llamar por teléfono!")
+                        mensaje = generar_email(neg['nombre'], tiene_web)
+                        # Guardamos el mensaje específico para este negocio
+                        st.session_state[f"msg_{neg['nombre']}"] = mensaje
+
+                # Si ya hemos generado el mensaje, lo mostramos y damos opción a enviarlo
+                if f"msg_{neg['nombre']}" in st.session_state:
+                    st.text_area("Borrador listo para enviar:", st.session_state[f"msg_{neg['nombre']}"], height=150, key=f"text_{neg['nombre']}")
+                    
+                    if st.button(f"📨 Enviar Correo Oficialmente", type="primary", key=f"send_{neg['nombre']}"):
+                        if not EMAIL_SENDER or not EMAIL_PASSWORD:
+                            st.error("⚠️ Faltan tus credenciales de Gmail en la barra izquierda.")
+                        else:
+                            with st.spinner("Enviando..."):
+                                exito = enviar_correo(email, f"Digitalización de {neg['nombre']}", st.session_state[f"msg_{neg['nombre']}"])
+                                if exito:
+                                    st.balloons()
+                                    st.success(f"¡Correo enviado a {email} con éxito!")
+            else:
+                st.warning("No se encontró email. Toca contactar por teléfono o redes sociales.")
