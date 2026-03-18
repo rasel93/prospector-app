@@ -9,8 +9,8 @@ from google import genai
 # ================= CONFIGURACIÓN =================
 st.set_page_config(page_title="Bot Prospector", page_icon="🤖", layout="wide")
 
-# 🔴 ESTE ES EL TÍTULO NUEVO. SI NO VES "VERSIÓN 4" EN TU PANTALLA, STREAMLIT NO SE HA ACTUALIZADO 🔴
-st.title("🚀 Mi Bot Prospector (Versión 4 - AntiBloqueo)")
+# TÍTULO ACTUALIZADO A VERSIÓN 5 PARA QUE SEPAS QUE SE HA ACTUALIZADO BIEN
+st.title("🚀 Mi Bot Prospector (Versión 5 - Alta Calidad)")
 
 if "negocios" not in st.session_state:
     st.session_state.negocios =[]
@@ -34,10 +34,10 @@ def buscar_negocios(ciudad, tipo_negocio):
         'q': f"{tipo_negocio} {ciudad}",
         'format': 'json',
         'extratags': 1,
-        'limit': 15
+        'limit': 50 # 🔴 Buscamos 50 resultados en lugar de 15 para poder filtrar los malos
     }
     headers = {
-        'User-Agent': 'MiAppProspeccion_B2B_v4 (tu_correo_real@gmail.com)' # Cambia este correo por el tuyo en el futuro
+        'User-Agent': 'MiAppProspeccion_B2B_v5 (tu_correo_real@gmail.com)'
     }
     
     try:
@@ -54,15 +54,25 @@ def buscar_negocios(ciudad, tipo_negocio):
             nombre = lugar.get('name', '')
             if not nombre: continue
                 
-            tags = lugar.get('extratags', {})
-            leads.append({
-                'nombre': nombre,
-                'web': tags.get('website') or tags.get('contact:website', None),
-                'telefono': tags.get('phone') or tags.get('contact:phone', 'No disponible')
-            })
+            # Evitar errores si no hay etiquetas
+            tags = lugar.get('extratags') or {}
             
+            web = tags.get('website') or tags.get('contact:website', None)
+            telefono = tags.get('phone') or tags.get('contact:phone', None)
+            
+            # 🔴 FILTRO INTELIGENTE: Si no tiene web ni teléfono, LO DESCARTAMOS
+            if web or telefono:
+                leads.append({
+                    'nombre': nombre,
+                    'web': web,
+                    'telefono': telefono if telefono else 'No disponible'
+                })
+            
+        # Limpiamos duplicados
         leads_unicos = {lead['nombre']: lead for lead in leads}.values()
-        return list(leads_unicos)[:5]
+        
+        # Devolvemos solo los 5 mejores que han pasado el filtro
+        return list(leads_unicos)[:5] 
         
     except Exception as e:
         st.error(f"Fallo de conexión: {e}")
@@ -109,10 +119,10 @@ with col1: ciudad_input = st.text_input("📍 Ciudad", "Valencia")
 with col2: tipo_input = st.selectbox("🏢 Tipo de Negocio",["dentist", "restaurant", "hospital", "lawyer"])
 
 if st.button("🔍 Buscar Clientes", type="primary"):
-    with st.spinner('Buscando en servidor oficial...'):
+    with st.spinner('Filtrando los mejores prospectos en la base de datos...'):
         st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
         if not st.session_state.negocios:
-            st.warning("No se encontraron resultados.")
+            st.warning("No se encontraron negocios con datos de contacto en esta ciudad.")
 
 if st.session_state.negocios:
     st.markdown("---")
@@ -132,6 +142,7 @@ if st.session_state.negocios:
                     st.text_area("Borrador:", st.session_state[f"msg_{neg['nombre']}"], height=100, key=f"text_{neg['nombre']}")
                     if st.button(f"📨 Enviar", type="primary", key=f"send_{neg['nombre']}"):
                         if enviar_correo(email, f"Mejora digital para {neg['nombre']}", st.session_state[f"msg_{neg['nombre']}"]):
+                            st.balloons()
                             st.success("¡Enviado!")
                         else: st.error("Error al enviar.")
-            else: st.warning("Sin email público.")
+            else: st.warning("Sin email público visible en su web.")
