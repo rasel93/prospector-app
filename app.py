@@ -8,8 +8,8 @@ from email.mime.multipart import MIMEMultipart
 from google import genai
 
 # ================= CONFIGURACIÓN =================
-st.set_page_config(page_title="Bot Prospector Agencia", page_icon="📈", layout="wide")
-st.title("📈 Máquina de Ventas: Web + Mantenimiento + Ads (V8)")
+st.set_page_config(page_title="Bot Prospector 2026", page_icon="🚀", layout="wide")
+st.title("🚀 Máquina de Ventas B2B (V9 - Edición 2026)")
 
 if "negocios" not in st.session_state:
     st.session_state.negocios =[]
@@ -63,7 +63,6 @@ def extraer_email_de_web(url):
     except: return None
 
 def auditar_velocidad(url):
-    """ Se conecta a Google PageSpeed Insights para auditar la web en versión MÓVIL """
     if not url: return None
     if not url.startswith("http"): url = "https://" + url
     try:
@@ -77,36 +76,36 @@ def generar_email(nombre, tiene_web, score=None):
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # 🧠 EL CEREBRO DE TUS VENTAS 🧠
+        # 🧠 EL CEREBRO DE TUS VENTAS EN 2026 🧠
         if tiene_web and score is not None:
             if score < 60:
-                contexto = f"He auditado su web y carga muy lento en móviles (tiene un {score}/100 en Google). La gente se cansa de esperar y se va a la competencia."
+                contexto = f"He pasado un escáner a su web y la velocidad móvil es muy deficiente (un {score}/100 según Google). En 2026, si una web tarda más de 3 segundos en cargar, el cliente se va automáticamente a la competencia."
             else:
-                contexto = f"Su web saca un {score}/100 en Google. Está bien, pero se puede optimizar muchísimo más para que convierta visitas en clientes reales."
+                contexto = f"Su web tiene un {score}/100 en Google. No es un desastre, pero en el mercado tan agresivo de 2026, se necesita una optimización perfecta para no tirar el dinero."
         elif tiene_web:
-            contexto = "Tienen web, pero hoy en día si no está optimizada y no recibe tráfico constante, es como tener una tienda en un callejón sin salida."
+            contexto = "Tienen web, pero hoy en día la mayoría de negocios tienen webs obsoletas que no convierten visitas en llamadas."
         else:
-            contexto = "No tienen página web. Son completamente invisibles en Google cuando alguien en la ciudad busca sus servicios."
+            contexto = "No tienen página web. Es impensable operar en 2026 sin presencia digital; son invisibles frente a su competencia directa."
 
         oferta = """
-        Dile que te dedicas a 3 cosas para negocios como el suyo:
-        1. Optimizar su web (o crearla) para que sea una máquina rápida de ventas.
-        2. Darles mantenimiento técnico mensual para que se despreocupen de caídas o hackeos.
-        3. Si quieren escalar en serio, lanzarles campañas de anuncios (Ads) para llenarles el teléfono de clientes esta misma semana.
-        Cierre: Ofréceles grabarles un vídeo-auditoría de 3 minutos gratis enseñando cómo hacerlo en su caso.
+        Ofrece una solución integral en 3 pasos:
+        1. Renovar u optimizar su web para que sea ultrarrápida y actual.
+        2. Mantenimiento técnico continuo para blindarla.
+        3. Campañas de anuncios (Ads) para inyectarles clientes de forma inmediata.
+        CIERRE: Ofréceles enviarles un vídeo-auditoría de 3 minutos sin compromiso para enseñarles los fallos exactos de su negocio.
         """
 
         prompt = f"""
-        Eres un experto Copywriter B2B. Escribe un correo en frío hiper-persuasivo para el dueño de '{nombre}'.
+        Eres un experto Copywriter de ventas. Escribe un cold email que destaque en una bandeja de entrada saturada. Dirigido al dueño de '{nombre}'.
         
-        SITUACIÓN DEL CLIENTE: {contexto}
-        TU OBJETIVO Y OFERTA: {oferta}
+        SITUACIÓN REAL: {contexto}
+        TU OFERTA: {oferta}
         
-        REGLAS ESTRICTAS:
-        1. Comienza la primera línea obligatoriamente con "Asunto: " y crea un asunto corto de 3 a 5 palabras que genere mucha curiosidad (Ej: Tu nota de Google, Idea para [Nombre]...).
-        2. El correo debe ser corto (máximo 5 líneas). 
-        3. Tono conversacional, como de tú a tú. NADA de "Estimado señor", "Cordial saludo" o lenguaje robótico.
-        4. Haz que la oferta suene imposible de rechazar porque el riesgo lo asumes tú al ofrecer el vídeo gratis inicial.
+        REGLAS ESTRICTAS PARA NO PARECER SPAM:
+        1. Primera línea: "Asunto: " seguido de un título de 3 a 5 palabras, directo al grano (ej: Error en web, Problema con la captación en [Nombre]...).
+        2. Longitud máxima: 4-5 líneas. La gente no lee emails largos.
+        3. Tono: Súper natural, de tú a tú. Como un consultor escribiendo a un amigo. CERO saludos corporativos, CERO lenguaje poético.
+        4. Haz énfasis en que el vídeo es 100% gratuito y lo grabas tú personalmente para su caso.
         """
         
         return client.models.generate_content(model='gemini-2.5-flash', contents=prompt).text
@@ -114,7 +113,7 @@ def generar_email(nombre, tiene_web, score=None):
 
 def enviar_correo(destinatario, cuerpo):
     lineas = cuerpo.split('\n')
-    asunto = "Mejora urgente para tu negocio"
+    asunto = "Oportunidad de crecimiento"
     cuerpo_final = cuerpo
     
     if lineas[0].lower().startswith("asunto:"):
@@ -142,7 +141,7 @@ with col1: ciudad_input = st.text_input("📍 Ciudad", "Madrid")
 with col2: tipo_input = st.text_input("🏢 Nicho (Ej: Dentista, Abogado, Reformas)", "Abogado")
 
 if st.button("🔍 Extraer Clientes y Auditar", type="primary"):
-    with st.spinner('Extrayendo base de datos de Google Maps...'):
+    with st.spinner('Extrayendo leads de alta calidad desde Google Maps...'):
         st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
         if not st.session_state.negocios:
             st.warning("No se encontraron resultados.")
@@ -164,28 +163,27 @@ if st.session_state.negocios:
             if email:
                 st.success(f"📧 Email de contacto: {email}")
                 
-                # BOTÓN PARA GENERAR EL TEXTO MAESTRO
-                if st.button(f"🚀 Analizar Web y Redactar Oferta", key=f"gen_{neg['nombre']}", type="primary"):
+                if st.button(f"🚀 Analizar Web y Redactar Oferta (Edición 2026)", key=f"gen_{neg['nombre']}", type="primary"):
                     score = None
                     if tiene_web:
-                        with st.spinner(f"Analizando velocidad móvil en servidores de Google..."):
+                        with st.spinner(f"Analizando métricas web en servidores de Google..."):
                             score = auditar_velocidad(neg['web'])
                             if score is not None:
-                                if score < 50: st.error(f"¡Lentitud extrema!: {score}/100. Presiona con la pérdida de clientes.")
-                                else: st.warning(f"Rendimiento: {score}/100. Se puede mejorar el diseño y hacer Ads.")
+                                if score < 50: st.error(f"¡Lentitud crítica!: {score}/100. Usa esto a tu favor.")
+                                else: st.warning(f"Rendimiento: {score}/100. Ideal para vender Ads y Mantenimiento.")
                     
-                    with st.spinner("La IA está redactando la oferta de Optimización + Mantenimiento + Ads..."):
+                    with st.spinner("La IA está redactando tu propuesta personalizada..."):
                         st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], tiene_web, score)
                 
                 if f"msg_{neg['nombre']}" in st.session_state:
                     st.text_area("Borrador listo para enviar:", st.session_state[f"msg_{neg['nombre']}"], height=220, key=f"text_{neg['nombre']}")
-                    if st.button(f"📨 Enviar Oferta", key=f"send_{neg['nombre']}"):
+                    if st.button(f"📨 Enviar Correo de Alto Impacto", key=f"send_{neg['nombre']}"):
                         if enviar_correo(email, st.session_state[f"msg_{neg['nombre']}"]):
                             st.balloons()
-                            st.success("¡Oferta enviada con éxito!")
+                            st.success("¡Oferta enviada y aterrizada en su bandeja de entrada!")
                         else: st.error("Error al enviar.")
             else: 
                 if tiene_web:
-                    st.warning("No tienen email visible. ¡Llámales para ofrecerles el vídeo gratis por WhatsApp!")
+                    st.warning("Sin email visible. ¡Súper oportunidad para hacer Cold Calling (Llamada) y preguntar por el dueño!")
                 else:
-                    st.warning("Oportunidad máxima: Sin web. Tienes que llamarles para ofrecerles el paquete completo.")
+                    st.warning("Oportunidad máxima: Negocio sin digitalizar. Llámalos ahora.")
