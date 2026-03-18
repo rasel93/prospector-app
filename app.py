@@ -143,4 +143,49 @@ with col2: tipo_input = st.text_input("🏢 Nicho (Ej: Dentista, Abogado, Reform
 
 if st.button("🔍 Extraer Clientes y Auditar", type="primary"):
     with st.spinner('Extrayendo base de datos de Google Maps...'):
-        st.sess
+        st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
+        if not st.session_state.negocios:
+            st.warning("No se encontraron resultados.")
+
+if st.session_state.negocios:
+    st.markdown("---")
+    for neg in st.session_state.negocios:
+        with st.expander(f"🏢 {neg['nombre']}", expanded=False):
+            st.write(f"**Web:** {neg['web'] or '❌ OPORTUNIDAD: No tiene web'}")
+            st.write(f"**Teléfono:** {neg['telefono']}")
+            
+            tiene_web = bool(neg['web'])
+            
+            if f"email_{neg['nombre']}" not in st.session_state:
+                st.session_state[f"email_{neg['nombre']}"] = extraer_email_de_web(neg['web']) if tiene_web else None
+            
+            email = st.session_state[f"email_{neg['nombre']}"]
+            
+            if email:
+                st.success(f"📧 Email de contacto: {email}")
+                
+                # BOTÓN PARA GENERAR EL TEXTO MAESTRO
+                if st.button(f"🚀 Analizar Web y Redactar Oferta", key=f"gen_{neg['nombre']}", type="primary"):
+                    score = None
+                    if tiene_web:
+                        with st.spinner(f"Analizando velocidad móvil en servidores de Google..."):
+                            score = auditar_velocidad(neg['web'])
+                            if score is not None:
+                                if score < 50: st.error(f"¡Lentitud extrema!: {score}/100. Presiona con la pérdida de clientes.")
+                                else: st.warning(f"Rendimiento: {score}/100. Se puede mejorar el diseño y hacer Ads.")
+                    
+                    with st.spinner("La IA está redactando la oferta de Optimización + Mantenimiento + Ads..."):
+                        st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], tiene_web, score)
+                
+                if f"msg_{neg['nombre']}" in st.session_state:
+                    st.text_area("Borrador listo para enviar:", st.session_state[f"msg_{neg['nombre']}"], height=220, key=f"text_{neg['nombre']}")
+                    if st.button(f"📨 Enviar Oferta", key=f"send_{neg['nombre']}"):
+                        if enviar_correo(email, st.session_state[f"msg_{neg['nombre']}"]):
+                            st.balloons()
+                            st.success("¡Oferta enviada con éxito!")
+                        else: st.error("Error al enviar.")
+            else: 
+                if tiene_web:
+                    st.warning("No tienen email visible. ¡Llámales para ofrecerles el vídeo gratis por WhatsApp!")
+                else:
+                    st.warning("Oportunidad máxima: Sin web. Tienes que llamarles para ofrecerles el paquete completo.")
