@@ -5,70 +5,67 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google import genai
-from duckduckgo_search import DDGS
 
-# ================= CONFIGURACIÓN DE PÁGINA =================
-st.set_page_config(page_title="Bot Prospector 3.0", page_icon="🤖", layout="wide")
-st.title("🚀 Mi Bot Prospector (Buscador Web)")
+# ================= CONFIGURACIÓN =================
+st.set_page_config(page_title="Bot Prospector", page_icon="🤖", layout="wide")
+
+# 🔴 ESTE ES EL TÍTULO NUEVO. SI NO VES "VERSIÓN 4" EN TU PANTALLA, STREAMLIT NO SE HA ACTUALIZADO 🔴
+st.title("🚀 Mi Bot Prospector (Versión 4 - AntiBloqueo)")
 
 if "negocios" not in st.session_state:
     st.session_state.negocios =[]
 
-# ================= BARRA LATERAL =================
 with st.sidebar:
     st.header("⚙️ Configuración")
     GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
     EMAIL_SENDER = st.secrets.get("EMAIL_SENDER", "")
     EMAIL_PASSWORD = st.secrets.get("EMAIL_PASSWORD", "")
     
-    if GEMINI_API_KEY:
-        st.success("✅ API de IA conectada")
-    else:
-        st.error("❌ Falta GEMINI_API_KEY")
+    if GEMINI_API_KEY: st.success("✅ IA conectada")
+    else: st.error("❌ Falta API Key")
         
-    if EMAIL_SENDER and EMAIL_PASSWORD:
-        st.success("✅ Correo conectado")
-    else:
-        st.error("❌ Faltan credenciales de correo")
+    if EMAIL_SENDER and EMAIL_PASSWORD: st.success("✅ Correo conectado")
+    else: st.error("❌ Faltan credenciales")
 
-# ================= NUEVO MOTOR DE BÚSQUEDA (DuckDuckGo) =================
-
+# ================= MOTOR DE BÚSQUEDA (NOMINATIM) =================
 def buscar_negocios(ciudad, tipo_negocio):
-    # Buscamos como lo haría un humano en Google/DuckDuckGo
-    query = f"{tipo_negocio} en {ciudad} sitio web oficial"
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        'q': f"{tipo_negocio} {ciudad}",
+        'format': 'json',
+        'extratags': 1,
+        'limit': 15
+    }
+    headers = {
+        'User-Agent': 'MiAppProspeccion_B2B_v4 (tu_correo_real@gmail.com)' # Cambia este correo por el tuyo en el futuro
+    }
     
     try:
-        # Esto busca en internet en tiempo real y NO bloquea IPs de la nube
-        resultados = DDGS().text(query, max_results=15)
+        respuesta = requests.get(url, params=params, headers=headers, timeout=15)
+        
+        if respuesta.status_code != 200:
+            st.error(f"El servidor oficial rechazó la conexión (Error {respuesta.status_code}).")
+            return[]
+            
+        datos = respuesta.json()
         leads =[]
         
-        # Filtramos para no meter redes sociales ni páginas amarillas
-        directorios =['facebook.com', 'instagram.com', 'yelp.', 'tripadvisor.', 'paginasamarillas', 'doctoralia', 'topdoctors', 'linkedin.com', 'tiktok.com']
-        
-        for res in resultados:
-            url = res.get('href', '')
-            
-            # Si es un directorio, lo ignoramos y pasamos al siguiente
-            if any(d in url for d in directorios):
-                continue
+        for lugar in datos:
+            nombre = lugar.get('name', '')
+            if not nombre: continue
                 
-            # Limpiar el título para sacar el nombre de la empresa
-            nombre_bruto = res.get('title', 'Negocio')
-            nombre = nombre_bruto.split('|')[0].split('-')[0].strip()
-            
+            tags = lugar.get('extratags', {})
             leads.append({
                 'nombre': nombre,
-                'web': url,
-                'telefono': "Consultar en su web" # El buscador web no da el teléfono directo, pero sí la web
+                'web': tags.get('website') or tags.get('contact:website', None),
+                'telefono': tags.get('phone') or tags.get('contact:phone', 'No disponible')
             })
             
-            if len(leads) >= 5: # Limitamos a 5 resultados buenos
-                break
-                
-        return leads
+        leads_unicos = {lead['nombre']: lead for lead in leads}.values()
+        return list(leads_unicos)[:5]
         
     except Exception as e:
-        st.error(f"Error en el buscador: {e}")
+        st.error(f"Fallo de conexión: {e}")
         return[]
 
 def extraer_email_de_web(url):
@@ -77,26 +74,19 @@ def extraer_email_de_web(url):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=6)
-        # Extraer correos con expresiones regulares
         emails = set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}", response.text))
-        emails =[e for e in emails if not e.lower().endswith(('sentry.io', 'wix.com', 'png', 'jpg', 'gif'))]
+        emails =[e for e in emails if not e.lower().endswith(('sentry.io', 'wix.com', 'png', 'jpg'))]
         return emails[0] if emails else None
-    except:
-        return None
+    except: return None
 
-def generar_email(nombre, web):
+def generar_email(nombre, tiene_web):
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
-        prompt = f"""
-        Eres un experto desarrollador web vendiendo tus servicios.
-        Escribe un email corto (máximo 4 líneas) muy humano y directo para el dueño del negocio '{nombre}'.
-        Dile que has visitado su web ({web}) y que crees que puedes mejorar su velocidad de carga y diseño móvil para que no pierdan clientes.
-        Propón una llamada rápida de 5 minutos.
-        """
-        respuesta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
-        return respuesta.text
-    except Exception as e:
-        return f"Error de IA: {e}"
+        if tiene_web: problema = "Diles que su web actual se puede modernizar para cargar más rápido."
+        else: problema = "Diles que al no tener página web pierden clientes frente a la competencia."
+        prompt = f"Escribe un email persuasivo de 3 líneas para el negocio '{nombre}'. {problema} Propón llamada de 5 mins."
+        return client.models.generate_content(model='gemini-2.5-flash', contents=prompt).text
+    except Exception as e: return f"Error IA: {e}"
 
 def enviar_correo(destinatario, asunto, cuerpo):
     msg = MIMEMultipart()
@@ -111,43 +101,37 @@ def enviar_correo(destinatario, asunto, cuerpo):
         server.send_message(msg)
         server.quit()
         return True
-    except:
-        return False
+    except: return False
 
-# ================= INTERFAZ PRINCIPAL =================
-
+# ================= INTERFAZ =================
 col1, col2 = st.columns(2)
-with col1:
-    ciudad_input = st.text_input("📍 Ciudad", "Valencia")
-with col2:
-    tipo_input = st.text_input("🏢 Tipo de Negocio", "Clínica dental") # Ahora puedes escribir lo que quieras en español
+with col1: ciudad_input = st.text_input("📍 Ciudad", "Valencia")
+with col2: tipo_input = st.selectbox("🏢 Tipo de Negocio",["dentist", "restaurant", "hospital", "lawyer"])
 
-if st.button("🔍 Buscar en Internet", type="primary", use_container_width=True):
-    with st.spinner('Rastreando páginas web en tiempo real...'):
+if st.button("🔍 Buscar Clientes", type="primary"):
+    with st.spinner('Buscando en servidor oficial...'):
         st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
         if not st.session_state.negocios:
-            st.warning("No se encontraron webs directas para esta búsqueda.")
+            st.warning("No se encontraron resultados.")
 
 if st.session_state.negocios:
     st.markdown("---")
     for neg in st.session_state.negocios:
         with st.expander(f"🏢 {neg['nombre']}", expanded=True):
-            st.write(f"**Web encontrada:** [{neg['web']}]({neg['web']})")
+            st.write(f"**Web:** {neg['web'] or '❌ No tiene'}")
+            st.write(f"**Teléfono:** {neg['telefono']}")
             
-            email = extraer_email_de_web(neg['web'])
+            tiene_web = bool(neg['web'])
+            email = extraer_email_de_web(neg['web']) if tiene_web else None
                 
             if email:
-                st.success(f"📧 Email detectado: {email}")
-                if st.button(f"✨ Redactar Propuesta", key=f"gen_{neg['nombre']}"):
-                    st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], neg['web'])
-
+                st.success(f"📧 Email: {email}")
+                if st.button(f"✨ Redactar", key=f"gen_{neg['nombre']}"):
+                    st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], tiene_web)
                 if f"msg_{neg['nombre']}" in st.session_state:
-                    st.text_area("Borrador (puedes editarlo):", st.session_state[f"msg_{neg['nombre']}"], height=150, key=f"text_{neg['nombre']}")
-                    if st.button(f"📨 Enviar Correo a {neg['nombre']}", type="primary", key=f"send_{neg['nombre']}"):
-                        if enviar_correo(email, f"Mejora para la web de {neg['nombre']}", st.session_state[f"msg_{neg['nombre']}"]):
-                            st.balloons()
-                            st.success("¡Enviado con éxito!")
-                        else:
-                            st.error("Error al enviar. Revisa la contraseña en los Secrets de Streamlit.")
-            else:
-                st.warning("No se encontró ningún email visible en la página principal de esta web.")
+                    st.text_area("Borrador:", st.session_state[f"msg_{neg['nombre']}"], height=100, key=f"text_{neg['nombre']}")
+                    if st.button(f"📨 Enviar", type="primary", key=f"send_{neg['nombre']}"):
+                        if enviar_correo(email, f"Mejora digital para {neg['nombre']}", st.session_state[f"msg_{neg['nombre']}"]):
+                            st.success("¡Enviado!")
+                        else: st.error("Error al enviar.")
+            else: st.warning("Sin email público.")
