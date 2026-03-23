@@ -10,12 +10,12 @@ from google import genai
 
 # ================= CONFIGURACIÓN DE PÁGINA =================
 st.set_page_config(page_title="Agencia Bot 2026", page_icon="📈", layout="wide")
-st.title("📈 Máquina B2B: Datos Reales + Nube Permanente")
+st.title("📈 Máquina B2B: Datos Reales + Nube Permanente (V10)")
 
 if "negocios" not in st.session_state:
     st.session_state.negocios =[]
 
-# ================= CREDENCIALES (Añadido JSONBin para Nube) =================
+# ================= CREDENCIALES =================
 with st.sidebar:
     st.header("⚙️ Tus Credenciales")
     SERPER_API_KEY = st.text_input("Serper API Key (Maps)", value=st.secrets.get("SERPER_API_KEY", ""), type="password")
@@ -28,7 +28,7 @@ with st.sidebar:
     JSONBIN_KEY = st.text_input("JSONBin Master Key", value=st.secrets.get("JSONBIN_KEY", ""), type="password")
     JSONBIN_BIN_ID = st.text_input("JSONBin Bin ID", value=st.secrets.get("JSONBIN_BIN_ID", ""))
 
-# ================= BASE DE DATOS EN LA NUBE (ANTI-PÉRDIDA) =================
+# ================= BASE DE DATOS EN LA NUBE SEGURA =================
 def cargar_contactados_nube():
     if not JSONBIN_KEY or not JSONBIN_BIN_ID:
         return[]
@@ -36,18 +36,31 @@ def cargar_contactados_nube():
         url = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}?meta=false"
         headers = {'X-Master-Key': JSONBIN_KEY}
         req = requests.get(url, headers=headers)
+        
         if req.status_code == 200:
-            return req.json() # Retorna la lista []
-        return []
-    except:
+            datos = req.json()
+            # JSONBin a veces envuelve la lista en un diccionario llamado "record"
+            if isinstance(datos, list):
+                return datos
+            elif isinstance(datos, dict) and 'record' in datos:
+                return datos['record']
+            else:
+                return[]
+        else:
+            st.error(f"❌ Error de JSONBin (Asegúrate de que el Bin ID y Master Key son correctos): {req.text}")
+            return[]
+    except Exception as e:
+        st.error(f"❌ Fallo al conectar con JSONBin: {e}")
         return[]
 
 def registrar_contactado_nube(nombre, email):
     if not JSONBIN_KEY or not JSONBIN_BIN_ID:
-        st.error("No tienes configurado JSONBin. El dato no se guardará permanentemente.")
         return
     
     lista_actual = cargar_contactados_nube()
+    if not isinstance(lista_actual, list): 
+        lista_actual =[]
+        
     lista_actual.append({"nombre": nombre.lower(), "email": email})
     
     try:
@@ -56,9 +69,11 @@ def registrar_contactado_nube(nombre, email):
             'Content-Type': 'application/json',
             'X-Master-Key': JSONBIN_KEY
         }
-        requests.put(url, json=lista_actual, headers=headers)
+        res = requests.put(url, json=lista_actual, headers=headers)
+        if res.status_code != 200:
+            st.error(f"Error al guardar en la nube: {res.text}")
     except Exception as e:
-        st.error(f"Error al guardar en la nube: {e}")
+        st.error(f"Error técnico al guardar: {e}")
 
 # ================= MOTOR DE BÚSQUEDA GOOGLE MAPS =================
 def buscar_negocios(ciudad, tipo_negocio):
@@ -72,18 +87,22 @@ def buscar_negocios(ciudad, tipo_negocio):
 
     try:
         respuesta = requests.request("POST", url, headers=headers, data=payload, timeout=15)
+        
+        if respuesta.status_code != 200:
+            st.error(f"❌ Error de Google Maps (Serper): {respuesta.text}")
+            return []
+            
         datos = respuesta.json()
         leads =[]
         
-        # Leemos la NUBE para saber a quién NO debemos volver a mostrar
-        lista_negra = [c['nombre'] for c in cargar_contactados_nube()]
+        datos_nube = cargar_contactados_nube()
+        lista_negra = [c['nombre'].lower() for c in datos_nube if isinstance(c, dict) and 'nombre' in c]
         
         for lugar in datos.get('places',[]):
             nombre = lugar.get('title', 'Sin Nombre')
             web = lugar.get('website')
             telefono = lugar.get('phoneNumber')
             
-            # FILTRO ANTI-DUPLICADOS (Desde la Nube)
             if nombre.lower() in lista_negra:
                 continue
                 
@@ -95,6 +114,7 @@ def buscar_negocios(ciudad, tipo_negocio):
                 })
         return leads[:10]
     except Exception as e:
+        st.error(f"❌ Error interno en la búsqueda: {e}")
         return[]
 
 # ================= EXTRAER EMAILS =================
@@ -115,20 +135,14 @@ def extraer_email_de_web(url_base):
 
 # ================= AUDITORÍA LCP (DATOS 100% REALES GOOGLE) =================
 def auditar_velocidad_avanzada(url):
-    """ Extrae el Largest Contentful Paint (LCP), la métrica de carga más estricta de Google """
     if not url: return None
     if not url.startswith("http"): url = "https://" + url
     try:
         api_url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={url}&strategy=mobile"
         res = requests.get(api_url, timeout=30).json()
         lighthouse = res.get('lighthouseResult', {})
-        
-        # Nota sobre 100
         score = int(lighthouse['categories']['performance']['score'] * 100)
-        
-        # Tiempo REAL en cargar el contenido más grande (LCP)
         lcp = lighthouse['audits']['largest-contentful-paint']['displayValue']
-        
         return {"score": score, "lcp": lcp}
     except: return None
 
@@ -138,20 +152,20 @@ def generar_email(nombre, web, datos_auditoria):
     
     if datos_auditoria:
         score = datos_auditoria['score']
-        lcp = datos_auditoria['lcp'] # Ej: "4.2 s"
+        lcp = datos_auditoria['lcp']
         
         prompt = f"""
         Escribe un email súper corto a '{nombre}'. Su web es '{web}'.
         
         INSTRUCCIONES CRÍTICAS (No inventes ni adornes nada):
-        1. Asunto obligatorio (Escribe "Asunto: " en la línea 1): "problema técnico en tu web"
+        1. Asunto obligatorio (Escribe "Asunto: " en la primera línea): "problema técnico en tu web"
         2. Tono: Directo y de negocios. PROHIBIDO decir "Hola" o "Espero que estés bien".
         3. El texto DEBE contener estos datos exactos y verídicos de Google Lighthouse:
            - Tarda {lcp} en cargar en móviles.
            - La nota de rendimiento es {score}/100.
-        4. Plantea el problema: En 2026, si una web tarda esos {lcp}, más del 50% de las visitas pagadas de anuncios se van.
+        4. Plantea el problema: En 2026, si una web tarda esos {lcp}, más del 50% de las visitas pagadas de anuncios se van antes de cargar.
         5. Ofrece la solución de forma directa: Optimización web, mantenimiento mensual continuo y gestión de campañas de Google Ads rentables.
-        6. Cierre (Llamada a la acción): Diles que has grabado un vídeo rápido de 2 minutos enseñando su error técnico en pantalla y pregúntales si se lo puedes enviar para que lo vean sin compromiso.
+        6. Cierre (Llamada a la acción): Diles que has grabado un vídeo rápido de 2 minutos enseñando su error técnico en pantalla y pregúntales si se lo puedes enviar por aquí para que lo vean sin compromiso.
         """
     else:
         prompt = f"""
@@ -191,7 +205,6 @@ def enviar_correo_y_registrar(destinatario, cuerpo, nombre_negocio):
         server.send_message(msg)
         server.quit()
         
-        # GUARDAR EN LA NUBE PARA SIEMPRE
         registrar_contactado_nube(nombre_negocio, destinatario)
         return True
     except: return False
@@ -203,12 +216,12 @@ with col2: nicho_input = st.text_input("🏢 Nicho", "Clínica dental")
 
 if st.button("🔍 Extraer Leads (Cruzar con Nube)", type="primary", use_container_width=True):
     if not JSONBIN_KEY or not JSONBIN_BIN_ID:
-        st.warning("⚠️ Ojo: No has configurado JSONBin. La app funcionará pero no recordará a quién descartaste si se reinicia el servidor.")
+        st.warning("⚠️ Ojo: No has configurado JSONBin en el menú izquierdo.")
         
     with st.spinner('Escaneando Google Maps y cruzando con tu base de datos en la nube...'):
         st.session_state.negocios = buscar_negocios(ciudad_input, nicho_input)
         if not st.session_state.negocios:
-            st.info("Todos los negocios ya han sido contactados o no hay resultados.")
+            st.info("Todos los negocios en los primeros resultados ya han sido contactados o la búsqueda no dio resultados.")
 
 if st.session_state.negocios:
     st.markdown("---")
@@ -241,7 +254,7 @@ if st.session_state.negocios:
                         st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], neg['web'], datos_auditoria)
                 
                 if f"msg_{neg['nombre']}" in st.session_state:
-                    st.text_area("Edita antes de enviar:", st.session_state[f"msg_{neg['nombre']}"], height=180, key=f"text_{neg['nombre']}")
+                    st.text_area("Edita antes de enviar:", st.session_state[f"msg_{neg['nombre']}"], height=200, key=f"text_{neg['nombre']}")
                     
                     if st.button(f"📨 Enviar Email y Guardar en Nube", key=f"send_{neg['nombre']}"):
                         if enviar_correo_y_registrar(email, st.session_state[f"msg_{neg['nombre']}"], neg['nombre']):
@@ -250,7 +263,7 @@ if st.session_state.negocios:
                         else: 
                             st.error("❌ Error de envío con Gmail.")
             else: 
-                st.warning(f"⚠️ No hay email en la web. Cold Calling: {neg['telefono']}")
-                if st.button("🗑️ Descartar en la Nube", key=f"desc_{neg['nombre']}"):
-                    registrar_contactado_nube(neg['nombre'], "Descartado")
-                    st.success("Guardado en tu lista negra en la nube.")
+                st.warning(f"⚠️ No hay email en la web. Ideal para llamar al {neg['telefono']}")
+                if st.button("🗑️ Descartar Lead en la Nube", key=f"desc_{neg['nombre']}"):
+                    registrar_contactado_nube(neg['nombre'], "Descartado sin email")
+                    st.success("Guardado en tu lista negra. Ya no aparecerá al buscar.")
