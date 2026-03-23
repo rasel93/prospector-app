@@ -3,33 +3,41 @@ import requests
 import re
 import json
 import smtplib
+import time
+from urllib.parse import urljoin
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from google import genai
 
-# ================= CONFIGURACIÓN =================
-st.set_page_config(page_title="Bot Prospector 2026", page_icon="🚀", layout="wide")
-st.title("🚀 Máquina de Ventas B2B (V9 - Edición 2026)")
+# ================= CONFIGURACIÓN DE PÁGINA =================
+st.set_page_config(page_title="Agencia Bot 2026", page_icon="💸", layout="wide")
+st.title("💸 Máquina de Prospección B2B: Google Maps + Auditoría Deep (Final)")
 
+# Inicializar estado para no perder datos al recargar
 if "negocios" not in st.session_state:
     st.session_state.negocios =[]
 
 with st.sidebar:
-    st.header("⚙️ Credenciales")
+    st.header("⚙️ Tus Credenciales")
     SERPER_API_KEY = st.text_input("Serper API Key", value=st.secrets.get("SERPER_API_KEY", ""), type="password")
     GEMINI_API_KEY = st.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
     EMAIL_SENDER = st.text_input("Tu Correo (Gmail)", value=st.secrets.get("EMAIL_SENDER", ""))
-    EMAIL_PASSWORD = st.text_input("Contraseña de App", value=st.secrets.get("EMAIL_PASSWORD", ""), type="password")
+    EMAIL_PASSWORD = st.text_input("Contraseña de App Gmail", value=st.secrets.get("EMAIL_PASSWORD", ""), type="password")
+    
     st.markdown("---")
+    st.markdown("**¿Por qué funciona esto?**\nCombina datos técnicos reales (Google Lighthouse) con un Copywriting hiper-específico para romper la barrera del SPAM en 2026.")
 
-# ================= MOTORES DE BÚSQUEDA Y AUDITORÍA =================
+# ================= 1. MOTOR GOOGLE MAPS =================
 def buscar_negocios(ciudad, tipo_negocio):
     if not SERPER_API_KEY:
-        st.error("⚠️ Falta tu Serper API Key.")
+        st.error("⚠️ Pon tu Serper API Key en la barra lateral.")
         return[]
 
     url = "https://google.serper.dev/places"
-    payload = json.dumps({"q": f"{tipo_negocio} en {ciudad}", "gl": "es", "hl": "es"})
+    payload = json.dumps({
+        "q": f"{tipo_negocio} en {ciudad}",
+        "gl": "es", "hl": "es"
+    })
     headers = {'X-API-KEY': SERPER_API_KEY, 'Content-Type': 'application/json'}
 
     try:
@@ -40,85 +48,125 @@ def buscar_negocios(ciudad, tipo_negocio):
         for lugar in datos.get('places',[]):
             web = lugar.get('website')
             telefono = lugar.get('phoneNumber')
+            
+            # Solo traemos negocios que existan de verdad y tengan algún contacto
             if web or telefono:
                 leads.append({
                     'nombre': lugar.get('title', 'Sin Nombre'),
                     'web': web,
                     'telefono': telefono if telefono else 'No disponible',
-                    'direccion': lugar.get('address', '')
+                    'direccion': lugar.get('address', 'Dirección no disponible')
                 })
-        return leads[:10]
+        return leads[:10] # Top 10 mejores resultados de Google
     except Exception as e:
+        st.error(f"Error con Google Maps: {e}")
         return[]
 
-def extraer_email_de_web(url):
-    if not url: return None
-    if not url.startswith("http"): url = "https://" + url
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers, timeout=8)
-        emails = set(re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,4}", response.text))
-        emails =[e for e in emails if not e.lower().endswith(('sentry.io', 'wix.com', 'png', 'jpg', 'jpeg'))]
-        return emails[0] if emails else None
-    except: return None
+# ================= 2. SCRAPER PROFUNDO DE EMAILS =================
+def extraer_email_de_web(url_base):
+    if not url_base: return None
+    if not url_base.startswith("http"): url_base = "https://" + url_base
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36'}
+    
+    # Rutas comunes donde los negocios esconden el email
+    rutas_a_probar =["", "/contacto", "/contact", "/aviso-legal"]
+    emails_encontrados = set()
+    
+    for ruta in rutas_a_probar:
+        url_actual = urljoin(url_base, ruta)
+        try:
+            response = requests.get(url_actual, headers=headers, timeout=5)
+            # Regex avanzado para evitar capturar falsos positivos (imágenes, sentry, etc.)
+            emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", response.text)
+            for e in emails:
+                e_lower = e.lower()
+                if not e_lower.endswith(('sentry.io', 'wix.com', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'css', 'js')):
+                    emails_encontrados.add(e_lower)
+            
+            # Si encuentra un email válido, no hace falta buscar en más páginas
+            if emails_encontrados:
+                return list(emails_encontrados)[0]
+        except:
+            continue
+            
+    return None
 
-def auditar_velocidad(url):
+# ================= 3. AUDITORÍA GOOGLE PAGESPEED =================
+def auditar_velocidad_avanzada(url):
     if not url: return None
     if not url.startswith("http"): url = "https://" + url
     try:
         api_url = f"https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url={url}&strategy=mobile"
-        respuesta = requests.get(api_url, timeout=25).json()
-        score = respuesta['lighthouseResult']['categories']['performance']['score'] * 100
-        return int(score)
-    except: return None
+        respuesta = requests.get(api_url, timeout=30).json()
+        
+        # Extraemos Nota General y el Tiempo Real de carga
+        lighthouse = respuesta.get('lighthouseResult', {})
+        score = lighthouse['categories']['performance']['score'] * 100
+        speed_index = lighthouse['audits']['speed-index']['displayValue'] # Ej: "4.5 s"
+        
+        return {"score": int(score), "speed_index": speed_index}
+    except:
+        return None
 
-def generar_email(nombre, tiene_web, score=None):
+# ================= 4. INTELIGENCIA ARTIFICIAL (COPYWRITING 2026) =================
+def generar_email(nombre, ciudad, nicho, web, datos_auditoria):
     try:
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # 🧠 EL CEREBRO DE TUS VENTAS EN 2026 🧠
-        if tiene_web and score is not None:
-            if score < 60:
-                contexto = f"He pasado un escáner a su web y la velocidad móvil es muy deficiente (un {score}/100 según Google). En 2026, si una web tarda más de 3 segundos en cargar, el cliente se va automáticamente a la competencia."
+        # Construimos un contexto híper-específico para que la IA no invente nada
+        if datos_auditoria:
+            score = datos_auditoria['score']
+            speed = datos_auditoria['speed_index']
+            
+            if score < 50:
+                diagnostico = f"La web {web} saca un {score}/100 en el test de Google y tarda {speed} en cargar en móviles. Esto es crítico."
             else:
-                contexto = f"Su web tiene un {score}/100 en Google. No es un desastre, pero en el mercado tan agresivo de 2026, se necesita una optimización perfecta para no tirar el dinero."
-        elif tiene_web:
-            contexto = "Tienen web, pero hoy en día la mayoría de negocios tienen webs obsoletas que no convierten visitas en llamadas."
+                diagnostico = f"La web {web} saca un {score}/100 y tarda {speed}. Es mejorable para maximizar la conversión de clientes."
+            
+            oferta = "Optimización técnica, Mantenimiento mensual para evitar caídas, y campañas de Ads para llenarles la agenda ahora que la web será rápida. Cierre: Grabar un vídeo de 2 mins gratis enseñando los fallos."
+            
+        elif web:
+            diagnostico = f"Tienen la web {web}, pero en 2026 el diseño y la velocidad lo son todo para no perder clientes frente a la competencia."
+            oferta = "Renovación/Mantenimiento web + Ads para captación. Cierre: Vídeo auditoría gratis."
         else:
-            contexto = "No tienen página web. Es impensable operar en 2026 sin presencia digital; son invisibles frente a su competencia directa."
-
-        oferta = """
-        Ofrece una solución integral en 3 pasos:
-        1. Renovar u optimizar su web para que sea ultrarrápida y actual.
-        2. Mantenimiento técnico continuo para blindarla.
-        3. Campañas de anuncios (Ads) para inyectarles clientes de forma inmediata.
-        CIERRE: Ofréceles enviarles un vídeo-auditoría de 3 minutos sin compromiso para enseñarles los fallos exactos de su negocio.
-        """
+            diagnostico = f"Buscando {nicho} en {ciudad}, me di cuenta de que NO tienen página web. Son invisibles digitalmente."
+            oferta = "Creación de web corporativa + Ads en Google para captar la demanda local de inmediato."
 
         prompt = f"""
-        Eres un experto Copywriter de ventas. Escribe un cold email que destaque en una bandeja de entrada saturada. Dirigido al dueño de '{nombre}'.
+        Eres el mejor vendedor de servicios digitales B2B. Vas a escribir un 'Cold Email' al dueño de: {nombre} (que está en {ciudad}).
         
-        SITUACIÓN REAL: {contexto}
-        TU OFERTA: {oferta}
+        DATOS REALES DEL CLIENTE (Úsalos para demostrar que has investigado):
+        {diagnostico}
         
-        REGLAS ESTRICTAS PARA NO PARECER SPAM:
-        1. Primera línea: "Asunto: " seguido de un título de 3 a 5 palabras, directo al grano (ej: Error en web, Problema con la captación en [Nombre]...).
-        2. Longitud máxima: 4-5 líneas. La gente no lee emails largos.
-        3. Tono: Súper natural, de tú a tú. Como un consultor escribiendo a un amigo. CERO saludos corporativos, CERO lenguaje poético.
-        4. Haz énfasis en que el vídeo es 100% gratuito y lo grabas tú personalmente para su caso.
+        LO QUE LE OFRECES:
+        {oferta}
+        
+        REGLAS DE ORO (INCUMPLIRLAS ES FRACASAR):
+        1. ASUNTO: Escribe un asunto en minúsculas, de 3-4 palabras, que parezca interno (Ej: problema con web, tu clínica en {ciudad}, error de carga). Empieza la respuesta con "Asunto: [tu asunto]".
+        2. CERO FLUFF: Prohibido decir "Hola, espero que estés bien", "Me pongo en contacto", o "Mi nombre es". Ve directo al grano en la primera línea.
+        3. LONGITUD: Máximo 4 líneas visuales de texto.
+        4. TONO: Directo, empático y experto. Como un mensaje de WhatsApp a un colega de negocios.
+        5. EL CIERRE: No le pidas que compre ni pidas una llamada larga. Ofrécele enviarle el vídeo de 2 minutos que ya "tienes pensado grabar" para enseñarle el problema visualmente.
         """
         
-        return client.models.generate_content(model='gemini-2.5-flash', contents=prompt).text
-    except Exception as e: return f"Error IA: {e}"
+        respuesta = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        return respuesta.text
+    except Exception as e:
+        return f"Error de IA: {e}"
 
+# ================= 5. MOTOR DE ENVÍO =================
 def enviar_correo(destinatario, cuerpo):
     lineas = cuerpo.split('\n')
-    asunto = "Oportunidad de crecimiento"
+    asunto = "Auditoría de tu negocio"
     cuerpo_final = cuerpo
     
-    if lineas[0].lower().startswith("asunto:"):
-        asunto = lineas[0].replace("Asunto:", "").replace("asunto:", "").strip()
-        cuerpo_final = '\n'.join(lineas[1:]).strip()
+    # Extraer el asunto generado por la IA
+    for i, linea in enumerate(lineas):
+        if linea.lower().startswith("asunto:"):
+            asunto = linea[lineas.index(linea)].replace("Asunto:", "").replace("asunto:", "").strip()
+            cuerpo_final = '\n'.join(lineas[i+1:]).strip()
+            break
 
     msg = MIMEMultipart()
     msg['From'] = EMAIL_SENDER
@@ -135,55 +183,69 @@ def enviar_correo(destinatario, cuerpo):
         return True
     except: return False
 
-# ================= INTERFAZ =================
+# ================= INTERFAZ WEB PRINCIPAL =================
 col1, col2 = st.columns(2)
-with col1: ciudad_input = st.text_input("📍 Ciudad", "Madrid")
-with col2: tipo_input = st.text_input("🏢 Nicho (Ej: Dentista, Abogado, Reformas)", "Abogado")
+with col1: ciudad_input = st.text_input("📍 Ciudad objetivo", "Madrid")
+with col2: nicho_input = st.text_input("🏢 Nicho (Ej: Clínica dental, Arquitecto)", "Clínica dental")
 
-if st.button("🔍 Extraer Clientes y Auditar", type="primary"):
-    with st.spinner('Extrayendo leads de alta calidad desde Google Maps...'):
-        st.session_state.negocios = buscar_negocios(ciudad_input, tipo_input)
+if st.button("🔍 Extraer Leads PRO de Google Maps", type="primary", use_container_width=True):
+    with st.spinner('Escaneando Google Maps...'):
+        st.session_state.negocios = buscar_negocios(ciudad_input, nicho_input)
         if not st.session_state.negocios:
-            st.warning("No se encontraron resultados.")
+            st.warning("No se encontraron resultados. Verifica la API Key de Serper.")
 
 if st.session_state.negocios:
     st.markdown("---")
+    st.subheader("🎯 Prospectos Encontrados")
+    
     for neg in st.session_state.negocios:
-        with st.expander(f"🏢 {neg['nombre']}", expanded=False):
-            st.write(f"**Web:** {neg['web'] or '❌ OPORTUNIDAD: No tiene web'}")
+        with st.expander(f"🏢 {neg['nombre']} - 📍 {neg['direccion'][:35]}...", expanded=False):
+            st.write(f"**Web:** {neg['web'] or '❌ NO TIENE (Cliente ideal para creación web)'}")
             st.write(f"**Teléfono:** {neg['telefono']}")
             
             tiene_web = bool(neg['web'])
             
+            # Buscar email con el Scraper Profundo
             if f"email_{neg['nombre']}" not in st.session_state:
-                st.session_state[f"email_{neg['nombre']}"] = extraer_email_de_web(neg['web']) if tiene_web else None
+                email_encontrado = None
+                if tiene_web:
+                    with st.spinner("Buscando email en la web y subpáginas..."):
+                        email_encontrado = extraer_email_de_web(neg['web'])
+                st.session_state[f"email_{neg['nombre']}"] = email_encontrado
             
             email = st.session_state[f"email_{neg['nombre']}"]
             
             if email:
-                st.success(f"📧 Email de contacto: {email}")
+                st.success(f"📧 Email validado: **{email}**")
                 
-                if st.button(f"🚀 Analizar Web y Redactar Oferta (Edición 2026)", key=f"gen_{neg['nombre']}", type="primary"):
-                    score = None
+                # BOTÓN: AUDITORÍA + IA
+                if st.button(f"🚀 Auditar Técnicamente y Escribir Propuesta", key=f"gen_{neg['nombre']}", type="primary"):
+                    datos_auditoria = None
                     if tiene_web:
-                        with st.spinner(f"Analizando métricas web en servidores de Google..."):
-                            score = auditar_velocidad(neg['web'])
-                            if score is not None:
-                                if score < 50: st.error(f"¡Lentitud crítica!: {score}/100. Usa esto a tu favor.")
-                                else: st.warning(f"Rendimiento: {score}/100. Ideal para vender Ads y Mantenimiento.")
+                        with st.spinner("Conectando con Google Lighthouse (Midiendo velocidad real)..."):
+                            datos_auditoria = auditar_velocidad_avanzada(neg['web'])
+                            
+                            if datos_auditoria:
+                                col_a, col_b = st.columns(2)
+                                col_a.metric("Nota Google (Móvil)", f"{datos_auditoria['score']}/100")
+                                col_b.metric("Tiempo de Carga Real", f"{datos_auditoria['speed_index']}")
                     
-                    with st.spinner("La IA está redactando tu propuesta personalizada..."):
-                        st.session_state[f"msg_{neg['nombre']}"] = generar_email(neg['nombre'], tiene_web, score)
+                    with st.spinner("Redactando el cold email basado en los fallos técnicos..."):
+                        mensaje = generar_email(neg['nombre'], ciudad_input, nicho_input, neg['web'], datos_auditoria)
+                        st.session_state[f"msg_{neg['nombre']}"] = mensaje
                 
+                # MOSTRAR EMAIL Y ENVIAR
                 if f"msg_{neg['nombre']}" in st.session_state:
-                    st.text_area("Borrador listo para enviar:", st.session_state[f"msg_{neg['nombre']}"], height=220, key=f"text_{neg['nombre']}")
-                    if st.button(f"📨 Enviar Correo de Alto Impacto", key=f"send_{neg['nombre']}"):
+                    st.text_area("Copia o edita el mensaje antes de enviar:", st.session_state[f"msg_{neg['nombre']}"], height=250, key=f"text_{neg['nombre']}")
+                    
+                    if st.button(f"📨 Enviar Correo a {neg['nombre']}", key=f"send_{neg['nombre']}"):
                         if enviar_correo(email, st.session_state[f"msg_{neg['nombre']}"]):
                             st.balloons()
-                            st.success("¡Oferta enviada y aterrizada en su bandeja de entrada!")
-                        else: st.error("Error al enviar.")
+                            st.success("✅ ¡Disparo completado! Email en su bandeja de entrada.")
+                        else: 
+                            st.error("❌ Error de SMTP. Revisa tu contraseña de Aplicación de Gmail.")
             else: 
                 if tiene_web:
-                    st.warning("Sin email visible. ¡Súper oportunidad para hacer Cold Calling (Llamada) y preguntar por el dueño!")
+                    st.warning("⚠️ No se encontró email público (ni en la home ni en /contacto). Sugerencia: Llámales al " + neg['telefono'])
                 else:
-                    st.warning("Oportunidad máxima: Negocio sin digitalizar. Llámalos ahora.")
+                    st.info("💡 Este negocio necesita una web urgente. Haz Cold Calling al " + neg['telefono'])
